@@ -1,0 +1,678 @@
+type: sections
+title: Energy Summary
+icon: mdi:power-plug-battery
+cards: []
+badges:
+  - type: custom:mushroom-template-badge
+    icon: mdi:flash
+    color: white
+    content: "Load: {{ (states('sensor.load_power') | float(0) / 1000) | round(1) }} kW"
+    entity: sensor.load_power
+    tap_action:
+      action: more-info
+  - type: custom:mushroom-template-badge
+    icon: mdi:solar-power
+    color: orange
+    content: >-
+      Solar: {{ (states('sensor.total_dc_power') | float(0) / 1000) | round(1)
+      }} kW
+    tap_action:
+      action: more-info
+    entity: sensor.total_dc_power
+  - type: custom:mushroom-template-badge
+    icon: |-
+      {% if (states('sensor.export_power') | float) > 100 %}
+        mdi:transmission-tower-export
+      {% elif (states('sensor.import_power') | float) > 100 %}
+        mdi:transmission-tower-import
+      {% else %}
+        mdi:transmission-tower-off
+      {% endif %}
+    color: |-
+      {% if (states('sensor.export_power') | float) > 100 %}
+        green
+      {% elif (states('sensor.import_power') | float) > 100 %}
+        #5A8DBE
+      {% else %}
+        mediumpurple
+      {% endif %}
+    content: |-
+      {% if (states('sensor.export_power') | float) > 100 %}
+        Exporting: {{ (states('sensor.export_power') | float(0) / 1000) | round(1) }} kW
+      {% elif (states('sensor.import_power') | float) > 100 %}
+        Importing: {{ (states('sensor.import_power') | float(0) / 1000) | round(1) }} kW
+      {% else %}
+        Grid Disconnected
+      {% endif %}
+    entity: sensor.meter_active_power
+    tap_action:
+      action: more-info
+  - type: custom:mushroom-template-badge
+    icon: |-
+      {% if states('binary_sensor.battery_charging') == "on" %}
+        mdi:battery-arrow-up
+      {% elif states('binary_sensor.battery_discharging') == "on" %}
+        mdi:battery-arrow-down
+      {% else %}
+        mdi:battery-off
+      {% endif %}
+    color: |-
+      {% if states('binary_sensor.battery_charging') == "on" %}
+        palevioletred
+      {% elif states('binary_sensor.battery_discharging') == "on" %}
+        teal
+      {% else %}
+        grey
+      {% endif %}
+    content: |-
+      {% if states('binary_sensor.battery_charging') == "on" %}
+        Battery Charging: {{ ((states('sensor.battery_charging_power') | float(0)) / 1000) | round(1) }} kW
+      {% elif states('binary_sensor.battery_discharging') == "on" %}
+        Battery Discharging: {{ ((states('sensor.battery_discharging_power') | float(0)) / 1000) | round(1) }} kW
+      {% else %}
+        Battery Idle
+      {% endif %}
+    entity: sensor.signed_battery_power
+    tap_action:
+      action: more-info
+  - type: custom:mushroom-template-badge
+    icon: mdi:battery
+    content: >-
+      Battery: {{ states('sensor.battery_charge_nominal') }} kWh ({{
+      states('sensor.battery_level_nominal')}}%)
+    entity: sensor.battery_charge_nominal
+    tap_action:
+      action: more-info
+    color: teal
+sections:
+  - type: grid
+    cards:
+      - type: custom:apexcharts-card
+        stacked: true
+        cache: false
+        header:
+          show: true
+          title: System Power and Forecast
+        apex_config:
+          chart:
+            height: 640px
+            stacked: true
+            stackOnlyBar: false
+        graph_span: 4d
+        span:
+          start: day
+        all_series_config:
+          stroke_width: 2
+          unit: kW
+          type: area
+          show:
+            in_legend: false
+          opacity: 0.7
+          extend_to: now
+          group_by:
+            duration: 60s
+            func: avg
+            fill: last
+          float_precision: 1
+        series:
+          - entity: sensor.battery_charging_power
+            name: Battery Charging
+            transform: return -x/1000
+            color: indianred
+            stack_group: exp
+          - entity: sensor.export_power
+            name: Solar Exported
+            transform: return -x/1000
+            color: mediumpurple
+            stack_group: exp
+          - entity: sensor.total_dc_power
+            name: Consumed Solar
+            transform: return x/1000
+            color: orange
+            stack_group: imp
+            extend_to: now
+          - entity: sensor.battery_discharging_power
+            name: Battery Discharging
+            transform: return x/1000
+            color: teal
+            stack_group: imp
+          - entity: sensor.import_power
+            name: Grid Import
+            transform: return x/1000
+            color: "#5A8DBE"
+            stack_group: imp
+            unit: kW
+          - entity: sensor.py_energy_forecast
+            name: Import
+            type: line
+            color: "#5A8DBE"
+            opacity: 1
+            curve: smooth
+            stroke_width: 2
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  return [
+                    new Date(entry.index),
+
+                    2*(entry.ene_med
+                    - Math.min(entry.sol_med, entry.ene_med)
+                    - Math.min(
+                        entry.ene_med - Math.min(entry.sol_med, entry.ene_med),
+                        entry.bat_med
+                      ))
+
+                  ];
+                });
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Solar
+            type: line
+            color: orange
+            opacity: 1
+            curve: smooth
+            stroke_width: 1
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  return [
+                    new Date(entry.index),
+                    2*Math.min(entry.sol_med, entry.ene_med)
+                  ];
+                });
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Discharge
+            type: line
+            color: teal
+            opacity: 1
+            curve: smooth
+            stroke_width: 1
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  return [
+                    new Date(entry.index),
+
+                    2*Math.min(
+                      entry.ene_med - Math.min(entry.sol_med, entry.ene_med),
+                      entry.bat_med
+                    )
+
+                  ];
+                });
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: zeroer
+            type: line
+            color: red
+            stroke_width: 0
+            opacity: 0
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  return [
+                    new Date(entry.index), -entry.ene_med*2
+                  ];
+                });
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Export
+            type: line
+            color: mediumpurple
+            opacity: 1
+            curve: smooth
+            stroke_width: 1
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  const consumed = Math.min(entry.sol_med, entry.ene_med);
+                  const surplus  = entry.sol_med - consumed;
+                  const charge   = Math.min(surplus, 25.6 - entry.bat_med);
+                  const export_kwh = surplus - charge;
+
+                  return [
+                    new Date(entry.index),
+                    (export_kwh > 0) ? -export_kwh*2 : 2*Math.min(entry.ene_med, 0)
+                  ];
+                });
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Charge
+            type: line
+            color: indianred
+            opacity: 1
+            curve: smooth
+            stroke_width: 1
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                .map((entry) => {
+                  const consumed = Math.min(entry.sol_med, entry.ene_med);
+                  const surplus  = entry.sol_med - consumed;
+                  const charge   = Math.min(surplus, 25.6 - entry.bat_med);
+
+                  return [
+                    new Date(entry.index),
+                    (charge > 0) ? -charge*2 : 0
+                  ];
+                });
+            show:
+              in_legend: false
+        grid_options:
+          columns: full
+      - type: custom:mushroom-template-card
+        primary: >-
+          Battery Charge: {{ states('sensor.daily_battery_charge') | round(2) }}
+          kWh
+        secondary: >-
+          Forecasted: {{ '{:.2f}'.format((states('sensor.daily_battery_charge')
+          | float(0)) +(state_attr('sensor.py_energy_forecast', 'today_charge')
+          | float(0))) }}kWh
+
+          {{ '{:.2f}'.format(max(0,(state_attr('sensor.py_energy_forecast',
+          'today_charge') | float(0)))) }}kWh remaining today
+
+          Tomorrow: {{ '{:.2f}'.format((state_attr('sensor.py_energy_forecast',
+          'tomorrow_charge') | float(0))) }}kWh
+        icon: mdi:battery-arrow-up
+        features_position: bottom
+        color: indianred
+        entity: sensor.daily_imported_energy
+        multiline_secondary: true
+        grid_options:
+          columns: 6
+          rows: auto
+        vertical: true
+      - type: custom:mushroom-template-card
+        primary: "Export: {{ states('sensor.daily_exported_energy') | round(2) }} kWh"
+        secondary: >-
+          Forecasted: {{ '{:.2f}'.format((states('sensor.daily_exported_energy')
+          | float(0)) +(state_attr('sensor.py_energy_forecast', 'today_export')
+          | float(0)))  }}kWh
+
+          {{ '{:.2f}'.format(max(0,(state_attr('sensor.py_energy_forecast',
+          'today_export') | float(0))))  }}kWh remaining today
+
+          Tomorrow: {{ '{:.2f}'.format((state_attr('sensor.py_energy_forecast',
+          'tomorrow_export') | float(0)))  }}kWh
+        icon: mdi:transmission-tower-import
+        features_position: bottom
+        color: mediumpurple
+        entity: sensor.daily_imported_energy
+        multiline_secondary: true
+        grid_options:
+          columns: 6
+          rows: auto
+        vertical: true
+      - type: custom:mushroom-template-card
+        primary: >-
+          Solar Used: {{ states('sensor.daily_direct_energy_consumption') |
+          round(2) }} kWh
+        secondary: >-
+          Forecasted: {{
+          '{:.2f}'.format((states('sensor.daily_direct_energy_consumption') |
+          float(0)) +(state_attr('sensor.py_energy_forecast', 'today_consumed')
+          | float(0))) }}kWh
+
+          {{ '{:.2f}'.format(max(0,(state_attr('sensor.py_energy_forecast',
+          'today_consumed') | float(0)))) }}kWh remaining today
+
+          Tomorrow: {{ '{:.2f}'.format((state_attr('sensor.py_energy_forecast',
+          'tomorrow_consumed') | float(0))) }}kWh
+        icon: mdi:solar-power
+        features_position: bottom
+        color: orange
+        entity: sensor.daily_imported_energy
+        multiline_secondary: true
+        grid_options:
+          columns: 6
+          rows: auto
+        vertical: true
+      - type: custom:mushroom-template-card
+        primary: "Battery Drain: {{ states('sensor.daily_battery_discharge')}} kWh"
+        secondary: >-
+          Forecasted: {{
+          '{:.2f}'.format((states('sensor.daily_battery_discharge') | float(0))
+          +(state_attr('sensor.py_energy_forecast', 'today_discharge') |
+          float(0))) }}kWh
+
+          {{ '{:.2f}'.format(max(0,(state_attr('sensor.py_energy_forecast',
+          'today_discharge') | float(0)))) }}kWh remaining today
+
+          Tomorrow: {{ '{:.2f}'.format((state_attr('sensor.py_energy_forecast',
+          'tomorrow_discharge') | float(0))) }}kWh
+        icon: mdi:battery-arrow-down
+        features_position: bottom
+        color: teal
+        entity: sensor.daily_imported_energy
+        multiline_secondary: true
+        grid_options:
+          columns: 6
+          rows: auto
+        vertical: true
+      - type: custom:mushroom-template-card
+        primary: "Import: {{ states('sensor.daily_imported_energy')}} kWh"
+        secondary: >-
+          Forecasted: {{ '{:.2f}'.format((states('sensor.daily_imported_energy')
+          | float(0)) +(state_attr('sensor.py_energy_forecast', 'today_import')
+          | float(0)))  }}kWh
+
+          {{ '{:.2f}'.format(max(0,(state_attr('sensor.py_energy_forecast',
+          'today_import') | float(0))))  }}kWh remaining today
+
+          Tomorrow: {{ '{:.2f}'.format((state_attr('sensor.py_energy_forecast',
+          'tomorrow_import') | float(0)))  }}kWh
+        icon: mdi:transmission-tower-export
+        features_position: bottom
+        color: "#5A8DBE"
+        entity: sensor.daily_imported_energy
+        multiline_secondary: true
+        grid_options:
+          columns: full
+          rows: auto
+    column_span: 2
+  - type: grid
+    cards:
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-entity-card
+            entity: sensor.self_consumed_solar
+            icon: mdi:solar-power-variant
+            icon_color: accent
+            fill_container: true
+          - type: custom:mushroom-entity-card
+            entity: sensor.self_sufficiency
+            name: Self Sufficiency
+            icon_color: green
+            icon: mdi:leaf
+            fill_container: true
+      - type: custom:apexcharts-card
+        stacked: true
+        header:
+          show: true
+          title: Battery Charge and Forecast
+        graph_span: 4d
+        apex_config:
+          yaxis:
+            min: 0
+          chart:
+            height: 300px
+        span:
+          start: day
+        all_series_config:
+          group_by:
+            func: last
+            duration: 30m
+        series:
+          - entity: sensor.battery_charge_nominal
+            name: Today
+            color: teal
+            stroke_width: 2
+            opacity: 0.5
+            extend_to: false
+            type: area
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Forecast
+            type: line
+            color: indianred
+            stroke_width: 1
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now() - 1000*30*60 && entry.bat_med !== null)
+                .map((entry) => {
+                  return [new Date(entry.index), entry.bat_med];
+                }); 
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Forecast
+            type: column
+            color: indianred
+            stroke_width: 0
+            opacity: 0
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now() - 1000*30*60 && entry.bat_low !== null)
+                .map((entry) => {
+                  return [new Date(entry.index), entry.bat_low];
+                }); 
+            show:
+              in_legend: false
+          - entity: sensor.py_energy_forecast
+            name: Forecast
+            type: column
+            color: indianred
+            stroke_width: 0
+            opacity: 0.5
+            data_generator: |
+              return entity.attributes.energy_forecast
+                .filter((entry) => new Date(entry.index).getTime() > Date.now() - 1000*30*60 && entry.bat_high !== null)
+                .map((entry) => {
+                  return [new Date(entry.index), entry.bat_high-entry.bat_low];
+                }); 
+            show:
+              in_legend: false
+        grid_options:
+          columns: full
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: entity
+            entity: input_boolean.show_forecast
+            content_info: name
+            name: Show Solar Forecast
+            tap_action:
+              action: toggle
+            icon_color: accent
+          - type: entity
+            entity: input_boolean.show_energy_forecast
+            content_info: name
+            name: Show Energy Forecast
+            tap_action:
+              action: toggle
+            icon_color: accent
+          - type: entity
+            entity: input_boolean.power_energy
+            content_info: name
+            icon_color: pink
+            name: Show Power
+            tap_action:
+              action: toggle
+        alignment: center
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: input_boolean.show_energy_forecast
+            state: "on"
+        card:
+          type: vertical-stack
+          cards:
+            - type: custom:apexcharts-card
+              header:
+                show: true
+                title: Forecast Energy Usage
+              apex_config:
+                yaxis:
+                  min: 0
+                chart:
+                  stacked: true
+                  stackOnlyBar: true
+              graph_span: 4d
+              span:
+                start: day
+              all_series_config:
+                group_by:
+                  func: avg
+                  duration: 30m
+                  fill: last
+              series:
+                - entity: sensor.daily_consumed_energy
+                  name: Today
+                  color: 2E93fA
+                  type: area
+                  extend_to: now
+                  opacity: 0.5
+                  stroke_width: 2
+                  show:
+                    in_legend: false
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: line
+                  color: indianred
+                  stroke_width: 2
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                      .map((entry) => {
+                        return [new Date(entry.index), entry.cene_med];
+                      });   
+                  show:
+                    in_legend: false
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: column
+                  color: indianred
+                  stroke_width: 0
+                  opacity: 0
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                      .filter((entry) => new Date(entry.index).getTime() > Date.now())
+                      .map((entry) => {
+                        return [new Date(entry.index), entry.cene_low];
+                      });  
+                  show:
+                    in_legend: false
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: column
+                  color: indianred
+                  stroke_width: 0.5
+                  opacity: 0.5
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                      .filter((entry) => new Date(entry.index).getTime() > Date.now() )
+                      .map((entry) => {
+                        return [new Date(entry.index), entry.cene_high-entry.cene_low];
+                      }); 
+                  show:
+                    in_legend: false
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: input_boolean.show_forecast
+            state: "on"
+        card:
+          type: vertical-stack
+          cards:
+            - type: custom:apexcharts-card
+              stacked: true
+              header:
+                show: true
+                title: Forecast PV Generation
+              apex_config:
+                yaxis:
+                  min: 0
+                chart:
+                  stacked: true
+                  stackOnlyBar: true
+              graph_span: 4d
+              span:
+                start: day
+              all_series_config:
+                group_by:
+                  func: avg
+                  duration: 30m
+                  fill: last
+              series:
+                - entity: sensor.total_dc_power
+                  name: Actual
+                  type: area
+                  extend_to: now
+                  opacity: 0.5
+                  transform: return x / 1000
+                  unit: kW
+                  stroke_width: 1
+                  show:
+                    in_legend: true
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: line
+                  color: indianred
+                  stack_group: stack1
+                  stroke_width: 2
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                     .map((entry) => {
+                        return [new Date(entry.index), entry.sol_med*2];
+                      });   
+                  show:
+                    in_legend: true
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: column
+                  color: indianred
+                  stack_group: stack1
+                  opacity: 0
+                  stroke_width: 0
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                      .filter((entry) => new Date(entry.index).getTime() > Date.now() )
+                      .map((entry) => {
+                        return [new Date(entry.index), entry.sol_low*2];
+                      });  
+                  show:
+                    in_legend: false
+                - entity: sensor.py_energy_forecast
+                  name: Forecast
+                  type: column
+                  color: indianred
+                  stroke_width: 0.5
+                  opacity: 0.5
+                  data_generator: |
+                    return entity.attributes.energy_forecast
+                      .filter((entry) => new Date(entry.index).getTime() > Date.now() )
+                      .map((entry) => {
+                        return [new Date(entry.index), (entry.sol_high-entry.sol_low)*2];
+                      });  
+                  show:
+                    in_legend: false
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: input_boolean.power_energy
+            state: "on"
+        card:
+          type: custom:energy-sankey-power-flow-card
+          config_version: 3
+          consumer_entities: []
+          battery_entities:
+            - entity: sensor.signed_battery_power
+          power_from_grid_entity: sensor.import_power
+          invert_battery_flows: true
+          hide_small_consumers: false
+          max_consumer_branches: 0
+          independent_grid_in_out: true
+          generation_entity: sensor.total_dc_power
+          power_to_grid_entity: sensor.export_power
+          battery_charge_only_from_generation: true
+      - type: conditional
+        conditions:
+          - condition: state
+            entity: input_boolean.power_energy
+            state: "off"
+        card:
+          type: energy-distribution
+    column_span: 1
+max_columns: 3
+dense_section_placement: true
